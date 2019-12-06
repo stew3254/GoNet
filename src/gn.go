@@ -1,103 +1,13 @@
 package main
 
 import (
-  "bufio"
   "flag"
-  "io"
   "fmt"
   "net"
   //"github.com/gdamore/tcell"
   "os"
   "strconv"
 )
-
-//Connection input
-func input(con *net.Conn, in *os.File, conChan <-chan *net.Conn, closedChan <-chan bool) {
-  reader := bufio.NewReader(in)
-  scanner := bufio.NewScanner(reader)
-
-  inputChan := make(chan bool)
-  sync := make(chan bool)
-  //Look for input
-  go func() {
-    for {
-      inputChan <- scanner.Scan()
-      //Sync the threads back up
-      <-sync
-    }
-  }()
-
-  //Check to see if the channel is still open
-  for {
-    select {
-    case newConn := <-conChan:
-      con = newConn
-    case closed := <-closedChan:
-      if closed {
-        return
-      }
-    case <-inputChan:
-      _, err := (*con).Write(scanner.Bytes())
-      if err != nil {
-        return
-      }
-      in.Sync()
-      //Something used to sync the two threads
-      sync <- true
-      if err != nil {
-        return
-      }
-      (*con).Write([]byte("\n"))
-    }
-  }
-  return
-}
-
-//Connection output
-func output(con *net.Conn, out *os.File, conChan <-chan *net.Conn, closedChan chan<- bool) {
-  //Remember to close the connection
-  defer (*con).Close()
-
-  reader := bufio.NewReader(out)
-  inputChan := make(chan int)
-  sync := make(chan bool)
-  b := make([]byte, 4096)
-
-  //Look for input
-  go func() {
-    for {
-      n, err := reader.Read(b)
-      fmt.Println("test")
-      //Catch EOF in case I handle this eventually
-      if err == io.EOF {
-        fmt.Fprint(out, "EOF")
-      }
-      inputChan <- n
-      //Sync the threads back up
-      <-sync
-    }
-  }()
-
-  //Loop until done
-  for {
-    select {
-    case newConn := <-conChan:
-      con = newConn
-    case n := <-inputChan:
-      if n == 0 {
-        //Connection kill the connection or the connection already died
-        closedChan <- true
-        return
-      }
-      fmt.Println("Something")
-      fmt.Fprint(out, string(b))
-      //Zero the buffer out again
-      ssetn(b, 0, n)
-      //Resync the thread back up
-      sync <- true
-    }
-  }
-}
 
 //Set the contents of a byte array to something
 func sset(b []byte, e byte) {
@@ -114,6 +24,7 @@ func ssetn(b []byte, e byte, n int) {
   }
 }
 
+//Checks valid port
 func isPort(p int) bool {
   if p < 0 || p > 65535 {
     return false
@@ -136,12 +47,8 @@ func main() {
   udp := *udpPtr
   verbose := *verbosePtr
 
-
-  //Used to notify io listeners if a connection has changed
-  conChan := make(chan *net.Conn)
-
-  //Connection
-  var c net.Conn
+  //Client
+  var client Client
 
   //Initialize network vars
   ip := ""
@@ -179,20 +86,17 @@ func main() {
       if isPort(sport) {
         laddr, _ := net.ResolveUDPAddr("udp", ":" + strconv.Itoa(sport))
         raddr := &net.UDPAddr {IP: net.ParseIP(ip), Port: dport, Zone: ""}
-        c, err = net.DialUDP("udp", laddr, raddr)
+        client.Con, err = net.DialUDP("udp", laddr, raddr)
       } else {
-        c, err = net.Dial("udp", net.JoinHostPort(ip, strconv.Itoa(dport)))
+        client.Con, err = net.Dial("udp", net.JoinHostPort(ip, strconv.Itoa(dport)))
       }
     } else {
-      c, err = net.Dial("tcp", net.JoinHostPort(ip, strconv.Itoa(dport)))
+      client.Con, err = net.Dial("tcp", net.JoinHostPort(ip, strconv.Itoa(dport)))
     }
     //Check to see if the connection is valid
     if err != nil {
       fmt.Fprintln(os.Stderr, "Failed to connect")
       return
-    }
-    if verbose {
-      fmt.Println("Connected to " + c.RemoteAddr().String() + " successfully!")
     }
   } else {
     //Make sure port is valid
@@ -215,7 +119,7 @@ func main() {
         fmt.Fprintln(os.Stderr, err)
         return
       }
-      c, _ = net.ListenUDP("udp", addr)
+      client.Con, _ = net.ListenUDP("udp", addr)
     } else {
       l, err = net.Listen("tcp", net.JoinHostPort(ip, strconv.Itoa(sport)))
       if err != nil {
@@ -225,9 +129,9 @@ func main() {
       defer l.Close()
 
       //Only allow one connection for now
-      c, err = l.Accept()
+      client.Con, err = l.Accept()
       if verbose {
-        fmt.Println("Connection from " + c.RemoteAddr().String() + " succeeded!")
+        fmt.Println("Connection from " + client.Con.RemoteAddr().String() + " succeeded!")
       }
       if err != nil {
         fmt.Fprintln(os.Stderr, err)
@@ -235,7 +139,8 @@ func main() {
     }
   }
 
-  closed := make(chan bool)
-  go output(&c, os.Stdout, conChan, closed)
-  input(&c, os.Stdin, conChan, closed)
+  client.Closed = make(chan bool)
+  client.In = os.Stdin
+  client.Out = os.Stdout
+  client.Handle()
 }
