@@ -1,0 +1,39 @@
+Data Source:
+  Potential IO sources to be parsed. Can be 1 directional or bidirectional
+
+  List of clauses:
+    Can only get input from:
+      stdin
+    Can only send output to:
+      stdout
+      stderr
+    Birectional:
+      tcp-listen:<ADDRESS>:<PORT> # Note if address is left blank, 0.0.0.0 will be assumed
+      tcp-connect:<ADDRESS>:<PORT> # Address cannot be left blank
+      udp-listen:<ADDRESS>:<PORT> # Note if address is left blank, 0.0.0.0 will be assumed
+      udp-connect:<ADDRESS>:<PORT> # Address cannot be left blank
+      file:<NAME>
+      command:<NAME> # Will worry about this later
+
+Labels:
+  Used to give a more convenient label to data sources
+
+  Syntax:
+    <label> <data source>
+
+  Examples:
+    in stdin # This maps the word in to stdin
+    out stdout # This maps the word out to stdout
+
+Pipes:
+  Pipes are used to transmit from one data source to another. This can use raw sources, or label names mapped to sources. Pipes can be chained to link multiple clauses together
+
+  Syntax:
+  <data source> -> <data source>
+
+  Examples:
+  in stdin
+  in -> stdout
+
+  l tcp-listen:0.0.0.0:1234
+  stdin -> l -> stdout
